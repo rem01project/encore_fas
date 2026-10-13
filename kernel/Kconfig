@@ -4,7 +4,4 @@ config ENCORE_FAS
 	default n
 	help
 	  Frame aware scheduling driver for Encore Tweaks (/dev/encore_fas).
-	  The module puts a uprobe on Surface::queueBuffer of a game and
-	  reports late frames, a low frame rate, and pauses to a daemon.
-
 	  Say N unless you build a daemon that uses this module.

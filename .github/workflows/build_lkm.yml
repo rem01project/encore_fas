@@ -1,0 +1,76 @@
+name: Build LKM
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      ddk_release:
+        description: "DDK image release"
+        required: false
+        default: "20260828"
+
+env:
+  DDK_RELEASE: ${{ inputs.ddk_release || '20260828' }}
+
+jobs:
+  build:
+    name: encore_fas.ko (${{ matrix.kmi }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        kmi:
+          - android12-5.10
+          - android13-5.10
+          - android13-5.15
+          - android14-5.15
+          - android14-6.1
+          - android15-6.6
+          - android16-6.12
+          - android17-6.18
+    container:
+      image: ghcr.io/ylarod/ddk-min:${{ matrix.kmi }}-${{ inputs.ddk_release || '20260828' }}
+      options: --privileged
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Build encore_fas.ko
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          cd kernel
+          # The DDK image already exports KDIR, ARCH, LLVM, CROSS_COMPILE for this KMI
+          echo "KDIR=$KDIR  ARCH=$ARCH  LLVM=$LLVM"
+          CC=clang make
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp encore_fas.ko "$GITHUB_WORKSPACE/out/${{ matrix.kmi }}_encore_fas.ko"
+          llvm-strip -d "$GITHUB_WORKSPACE/out/${{ matrix.kmi }}_encore_fas.ko"
+          modinfo "$GITHUB_WORKSPACE/out/${{ matrix.kmi }}_encore_fas.ko" | grep -E 'vermagic|license|depends' || true
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: aarch64-${{ matrix.kmi }}-lkm
+          path: out/${{ matrix.kmi }}_encore_fas.ko
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: aarch64-*-lkm
+          merge-multiple: true
+          path: out
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" out/*.ko --repo "$GITHUB_REPOSITORY" --generate-notes

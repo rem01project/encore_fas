@@ -1,6 +1,6 @@
 config ENCORE_FAS
 	tristate "Encore Tweaks FAS kernel module"
-	depends on ARM64 && UPROBES && ANDROID
+	depends on ARM64 && UPROBES
 	default n
 	help
 	  Frame aware scheduling driver for Encore Tweaks (/dev/encore_fas).

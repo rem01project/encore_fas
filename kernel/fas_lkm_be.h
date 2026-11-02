@@ -33,8 +33,29 @@
     #error "encore_fas requires Linux Kernel 4.14 or later."
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
-    #error "Use the eBPF backend on Linux 5.10+."
+/*
+ * uprobe consumer API differences:
+ *
+ *   < 6.12   uprobe_register(inode, off, uc) returns int, uprobe_unregister(inode, off, uc)
+ *            is synchronous, filter() takes an extra enum uprobe_filter_ctx.
+ *   >= 6.12  uprobe_register(inode, off, ref_ctr_off, uc) returns struct uprobe * or ERR_PTR,
+ *            teardown is uprobe_unregister_nosync() + one uprobe_unregister_sync(),
+ *            filter() has no ctx argument.
+ *   >= 6.13  handler() and ret_handler() take a trailing __u64 *data.
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+    #define FAS_UPROBE_OBJ 1
+    #define FAS_UPROBE_FILTER_ARGS struct uprobe_consumer *uc, struct mm_struct *mm
+#else
+    #define FAS_UPROBE_FILTER_ARGS struct uprobe_consumer *uc, enum uprobe_filter_ctx ctx, struct mm_struct *mm
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
+    #define FAS_UPROBE_HANDLER_ARGS struct uprobe_consumer *uc, struct pt_regs *regs, __u64 *data
+    #define FAS_UPROBE_RET_HANDLER_ARGS struct uprobe_consumer *uc, unsigned long func, struct pt_regs *regs, __u64 *data
+#else
+    #define FAS_UPROBE_HANDLER_ARGS struct uprobe_consumer *uc, struct pt_regs *regs
+    #define FAS_UPROBE_RET_HANDLER_ARGS struct uprobe_consumer *uc, unsigned long func, struct pt_regs *regs
 #endif
 
 struct fas_ctx;
@@ -43,6 +64,9 @@ struct fas_probe {
     struct uprobe_consumer uc;
     struct fas_ctx *ctx;
     loff_t offset;
+#ifdef FAS_UPROBE_OBJ
+    struct uprobe *up;
+#endif
 };
 
 struct fas_ctx {

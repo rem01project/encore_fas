@@ -63,11 +63,11 @@ static __always_inline void fas_t1(u64 t0) {
         atomic64_set(&fas_dbg_ns_max, dt);
 }
 
-static bool fas_filter(struct uprobe_consumer *uc, enum uprobe_filter_ctx ctx, struct mm_struct *mm) {
+static bool fas_filter(FAS_UPROBE_FILTER_ARGS) {
     return mm == container_of(uc, struct fas_probe, uc)->ctx->mm;
 }
 
-static int fas_h_dq_enter(struct uprobe_consumer *uc, struct pt_regs *regs) {
+static int fas_h_dq_enter(FAS_UPROBE_HANDLER_ARGS) {
     struct fas_ctx *ctx = container_of(uc, struct fas_probe, uc)->ctx;
     u64 t0 = fas_t0();
 
@@ -76,7 +76,7 @@ static int fas_h_dq_enter(struct uprobe_consumer *uc, struct pt_regs *regs) {
     return 0;
 }
 
-static int fas_h_dq_ret(struct uprobe_consumer *uc, unsigned long func, struct pt_regs *regs) {
+static int fas_h_dq_ret(FAS_UPROBE_RET_HANDLER_ARGS) {
     struct fas_ctx *ctx = container_of(uc, struct fas_probe, uc)->ctx;
     u64 t0 = fas_t0();
 
@@ -85,13 +85,42 @@ static int fas_h_dq_ret(struct uprobe_consumer *uc, unsigned long func, struct p
     return 0;
 }
 
-static int fas_h_q_enter(struct uprobe_consumer *uc, struct pt_regs *regs) {
+static int fas_h_q_enter(FAS_UPROBE_HANDLER_ARGS) {
     struct fas_ctx *ctx = container_of(uc, struct fas_probe, uc)->ctx;
     u64 t0 = fas_t0();
 
     fas_on_queue_enter(ctx, regs->regs[0], regs->regs[1]);
     fas_t1(t0);
     return 0;
+}
+
+static int fas_uprobe_register(struct inode *inode, struct fas_probe *probe) {
+#ifdef FAS_UPROBE_OBJ
+    struct uprobe *up = uprobe_register(inode, probe->offset, 0, &probe->uc);
+
+    if (IS_ERR(up))
+        return PTR_ERR(up);
+    probe->up = up;
+    return 0;
+#else
+    return uprobe_register(inode, probe->offset, &probe->uc);
+#endif
+}
+
+/* Handlers may still be running on other CPUs until fas_uprobe_sync() returns. */
+static void fas_uprobe_unregister(struct inode *inode, struct fas_probe *probe) {
+#ifdef FAS_UPROBE_OBJ
+    uprobe_unregister_nosync(probe->up, &probe->uc);
+    probe->up = NULL;
+#else
+    uprobe_unregister(inode, probe->offset, &probe->uc);
+#endif
+}
+
+static void fas_uprobe_sync(void) {
+#ifdef FAS_UPROBE_OBJ
+    uprobe_unregister_sync();
+#endif
 }
 
 static bool fas_is_root(void) {
@@ -131,7 +160,8 @@ static void fas_unregister(struct fas_ctx *ctx) {
     u32 i;
 
     for (i = 0; i < ctx->nprobes; i++)
-        uprobe_unregister(d_inode(ctx->path.dentry), ctx->probe[i].offset, &ctx->probe[i].uc);
+        fas_uprobe_unregister(d_inode(ctx->path.dentry), &ctx->probe[i]);
+    fas_uprobe_sync();
     ctx->nprobes = 0;
     path_put(&ctx->path);
     mmdrop(ctx->mm);
@@ -208,7 +238,7 @@ static long fas_ioctl_register(struct fas_ctx *ctx, void __user *uarg) {
         }
         probe->uc.filter = fas_filter;
 
-        ret = uprobe_register(inode, probe->offset, &probe->uc);
+        ret = fas_uprobe_register(inode, probe);
         if (ret)
             goto err_probes;
         ctx->nprobes = i + 1;
@@ -220,7 +250,8 @@ static long fas_ioctl_register(struct fas_ctx *ctx, void __user *uarg) {
 
 err_probes:
     for (i = 0; i < ctx->nprobes; i++)
-        uprobe_unregister(inode, ctx->probe[i].offset, &ctx->probe[i].uc);
+        fas_uprobe_unregister(inode, &ctx->probe[i]);
+    fas_uprobe_sync();
     ctx->nprobes = 0;
 err_path:
     path_put(&ctx->path);
@@ -360,7 +391,9 @@ static const struct file_operations fas_fops = {
     .owner = THIS_MODULE,
     .open = fas_open,
     .release = fas_release,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
     .llseek = no_llseek,
+#endif
     .read = fas_read,
     .poll = fas_poll,
     .unlocked_ioctl = fas_ioctl,

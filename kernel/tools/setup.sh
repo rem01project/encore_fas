@@ -29,34 +29,61 @@ initialize_variables() {
 	DRIVER_KCONFIG="$DRIVER_DIR/Kconfig"
 }
 
+is_managed_submodule() {
+	[ -f "$GKI_ROOT/.gitmodules" ] || return 1
+	configured_path=$(git config -f "$GKI_ROOT/.gitmodules" --get "submodule.$MODULE_NAME.path" 2>/dev/null || true)
+	configured_url=$(git config -f "$GKI_ROOT/.gitmodules" --get "submodule.$MODULE_NAME.url" 2>/dev/null || true)
+	[ "$configured_path" = "$MODULE_NAME" ] && [ "$configured_url" = "$REPO_URL" ]
+}
+
 perform_cleanup() {
 	echo "[+] Cleaning up..."
 
-	if [ -L "$DRIVER_DIR/$MODULE_NAME" ]; then
-		rm "$DRIVER_DIR/$MODULE_NAME"
-		echo "[-] Symlink removed."
+	if ! is_managed_submodule; then
+		echo "[ERROR] $MODULE_NAME is not registered as this script's submodule."
+		exit 1
 	fi
 
-	if grep -q "$MODULE_NAME" "$DRIVER_MAKEFILE"; then
-		sed -i "/$MODULE_NAME/d" "$DRIVER_MAKEFILE"
+	if [ -d "$SRC_DIR" ] && [ -n "$(git -C "$SRC_DIR" status --porcelain --untracked-files=all)" ]; then
+		echo "[ERROR] $SRC_DIR has local changes. Commit or remove them before cleanup."
+		exit 1
+	fi
+
+	if [ -L "$DRIVER_DIR/$MODULE_NAME" ]; then
+		if [ -d "$SRC_DIR/$MODULE_SUBDIR" ] && [ "$(readlink "$DRIVER_DIR/$MODULE_NAME")" = "$(realpath --relative-to="$DRIVER_DIR" "$SRC_DIR/$MODULE_SUBDIR")" ]; then
+			rm "$DRIVER_DIR/$MODULE_NAME"
+			echo "[-] Symlink removed."
+		else
+			echo "[!] Preserving symlink that does not point to this submodule."
+		fi
+	fi
+
+	if grep -Fqx 'obj-$(CONFIG_ENCORE_FAS) += encore_fas/' "$DRIVER_MAKEFILE"; then
+		sed -i '\|^obj-$(CONFIG_ENCORE_FAS) += encore_fas/$|d' "$DRIVER_MAKEFILE"
 		echo "[-] Makefile reverted."
 	fi
 
-	if grep -q "drivers/$MODULE_NAME/Kconfig" "$DRIVER_KCONFIG"; then
-		sed -i "/drivers\\/$MODULE_NAME\\/Kconfig/d" "$DRIVER_KCONFIG"
+	if grep -Fqx "source \"drivers/$MODULE_NAME/Kconfig\"" "$DRIVER_KCONFIG"; then
+		sed -i "\\|^source \"drivers/$MODULE_NAME/Kconfig\"$|d" "$DRIVER_KCONFIG"
 		echo "[-] Kconfig reverted."
 	fi
 
-	if [ -d "$SRC_DIR" ]; then
-		git submodule deinit -f "$MODULE_NAME" 2>/dev/null || true
-		git rm -f "$MODULE_NAME" 2>/dev/null || rm -rf "$SRC_DIR"
-		rm -rf ".git/modules/$MODULE_NAME"
-		echo "[-] $MODULE_NAME submodule removed."
+	git -C "$GKI_ROOT" submodule deinit -f -- "$MODULE_NAME" 2>/dev/null || true
+	git -C "$GKI_ROOT" rm -f -- "$MODULE_NAME"
+	MODULE_GIT_DIR=$(git -C "$GKI_ROOT" rev-parse --git-path "modules/$MODULE_NAME")
+	if [ -d "$MODULE_GIT_DIR" ]; then
+		rm -rf "$MODULE_GIT_DIR"
 	fi
+	echo "[-] $MODULE_NAME submodule removed."
 }
 
 setup_module() {
 	echo "[+] Setting up $MODULE_NAME..."
+
+	if [ -d "$SRC_DIR" ] && [ -n "$(git -C "$SRC_DIR" status --porcelain --untracked-files=all)" ]; then
+		echo "[ERROR] $SRC_DIR has local changes. Commit or remove them before updating."
+		exit 1
+	fi
 
 	if [ ! -d "$SRC_DIR" ]; then
 		git submodule add "$REPO_URL" "$MODULE_NAME"
@@ -72,12 +99,10 @@ setup_module() {
 		echo "[-] Unshallowed."
 	fi
 
-	git stash
-	echo "[-] Stashed local changes."
 	git fetch --tags
 
 	if [ -z "${1-}" ]; then
-		TAG=$(git describe --abbrev=0 --tags 2>/dev/null || true)
+		TAG=$(git tag --sort=-version:refname | sed -n '1p')
 		if [ -n "$TAG" ]; then
 			git checkout "$TAG"
 			echo "[-] Checked out latest tag: $TAG."
@@ -102,12 +127,12 @@ setup_module() {
 	ln -sfn "$(realpath --relative-to="$DRIVER_DIR" "$TARGET_DIR")" "$MODULE_NAME"
 	echo "[+] Symlink created."
 
-	if ! grep -q "$MODULE_NAME" "$DRIVER_MAKEFILE"; then
+	if ! grep -Fqx 'obj-$(CONFIG_ENCORE_FAS) += encore_fas/' "$DRIVER_MAKEFILE"; then
 		printf '\nobj-$(CONFIG_ENCORE_FAS) += %s/\n' "$MODULE_NAME" >>"$DRIVER_MAKEFILE"
 		echo "[+] Modified Makefile."
 	fi
 
-	if ! grep -q "source \"drivers/$MODULE_NAME/Kconfig\"" "$DRIVER_KCONFIG"; then
+	if ! grep -Fqx "source \"drivers/$MODULE_NAME/Kconfig\"" "$DRIVER_KCONFIG"; then
 		sed -i "/endmenu/i\\source \"drivers/$MODULE_NAME/Kconfig\"" "$DRIVER_KCONFIG"
 		echo "[+] Modified Kconfig."
 	fi

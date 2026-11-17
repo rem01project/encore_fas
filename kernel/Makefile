@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 obj-$(CONFIG_ENCORE_FAS) += encore_fas.o
-encore_fas-y := fas_lkm.o
+encore_fas-y := encore_fas_main.o encore_fas_device.o encore_fas_session.o encore_fas_uprobe.o
 
 ifeq ($(KERNELRELEASE),)
 
@@ -37,6 +37,6 @@ ccflags-y += -DFAS_VERSION=$(fas_git_version)
 ccflags-y += -DFAS_BRANCH=\"$(fas_git_branch)\"
 endif
 
-ccflags-y += -I$(fas_srcdir) -I$(fas_srcdir)/../src -I$(fas_srcdir)/../include
+ccflags-y += -I$(fas_srcdir)/internal -I$(fas_srcdir)/../uapi
 
 endif

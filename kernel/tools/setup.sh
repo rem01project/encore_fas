@@ -2,7 +2,7 @@
 set -eu
 
 GKI_ROOT=$(pwd)
-REPO_URL="https://github.com/Rem01Gaming/encore_fas"
+REPO_URL="https://github.com/rem01project/encore_fas"
 MODULE_NAME="encore_fas"
 MODULE_SUBDIR="kernel"
 SRC_DIR="$GKI_ROOT/${MODULE_NAME}"

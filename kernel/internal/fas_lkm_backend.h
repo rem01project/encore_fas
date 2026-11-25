@@ -11,6 +11,7 @@
 #include <linux/path.h>
 #include <linux/pid.h>
 #include <linux/sched.h>
+#include <linux/sched/clock.h>
 #include <linux/sched/mm.h>
 #include <linux/smp.h>
 #include <linux/timekeeping.h>
@@ -108,7 +109,12 @@ static __always_inline s32 fas_be_tid(void) {
 
 static __always_inline bool fas_be_sched(struct fas_ctx *ctx, u64 *exec_ns, u64 *delay_ns) {
 #ifdef CONFIG_SCHED_INFO
+    u64 exec_start = READ_ONCE(current->se.exec_start);
+    u64 now = sched_clock();
+
     *exec_ns = READ_ONCE(current->se.sum_exec_runtime);
+    if (now > exec_start)
+        *exec_ns += now - exec_start;
     *delay_ns = READ_ONCE(current->sched_info.run_delay);
     return true;
 #else

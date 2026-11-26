@@ -48,7 +48,9 @@ struct fas_event {
     __u64 delay_ns;
     __s32 tid;
     __s32 arg;
-    __u64 reserved0;
+    __u16 ctx_vol;
+    __u16 ctx_invol;
+    __u32 reserved0;
     __u16 type;
     __u8 cpu;
     __u8 flags;

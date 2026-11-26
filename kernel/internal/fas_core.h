@@ -52,6 +52,8 @@ FAS_INLINE void fas_put(FAS_CTX *ctx, const struct fas_stamp *stamp, __u16 type,
             ev->delay_ns = 0;
             ev->tid = stamp->tid;
             ev->arg = (__s32)lost_count;
+            ev->ctx_vol = 0;
+            ev->ctx_invol = 0;
             ev->reserved0 = 0;
             fas_be_commit(ctx, &guard, ev, FAS_EVENT_LOST, FAS_EVF_NO_SCHED, false);
         } else {
@@ -70,6 +72,8 @@ FAS_INLINE void fas_put(FAS_CTX *ctx, const struct fas_stamp *stamp, __u16 type,
     ev->delay_ns = stamp->delay_ns;
     ev->tid = stamp->tid;
     ev->arg = arg;
+    ev->ctx_vol = 0;
+    ev->ctx_invol = 0;
     ev->reserved0 = 0;
 
     fas_be_commit(ctx, &guard, ev, type, stamp->flags, type == FAS_EVENT_QUEUE_ENTER);
